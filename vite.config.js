@@ -4,13 +4,18 @@ import react from '@vitejs/plugin-react';
 
 /**
  * Mirrors the `Content-Security-Policy` header in firebase.json and
- * vercel.json. `style-src` needs 'unsafe-inline' because Vite injects
- * styles as inline <style> elements during dev and React sets a couple
- * of inline style properties (src/components/home/Hero.jsx); everything
- * else is locked to this origin plus the two services the app actually
- * talks to — Firebase and Cloudinary.
+ * vercel.json. `style-src` needs 'unsafe-inline' because the production
+ * build inlines the entry stylesheet (see inlineEntryStylesheet below)
+ * and React sets a couple of inline style properties
+ * (src/components/home/Hero.jsx); everything else is locked to this
+ * origin plus the two services the app actually talks to — Firebase and
+ * Cloudinary.
+ *
+ * This is the policy production really sends. `npm run preview` serves
+ * the real build and gets it verbatim, so anything it would block in
+ * production is blocked here too.
  */
-const CSP = [
+const PRODUCTION_CSP = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
@@ -22,6 +27,66 @@ const CSP = [
   "img-src 'self' data: https://res.cloudinary.com https://picsum.photos",
   "connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseinstallations.googleapis.com https://api.cloudinary.com",
 ].join('; ');
+
+/**
+ * The dev server needs one directive relaxed, and it is not optional.
+ *
+ * `@vitejs/plugin-react` injects an inline <script type="module">
+ * preamble into the page during development to install React Refresh.
+ * `script-src 'self'` blocks it, React never bootstraps, and `npm run
+ * dev` serves the static shell from index.html with no stylesheet and
+ * no app — a blank-looking page and a CSP error in the console, with
+ * nothing to suggest the config is the cause.
+ *
+ * That happened: the policy above was added to both servers at once and
+ * broke `npm run dev` outright. Dev therefore gets 'unsafe-inline' for
+ * scripts only.
+ *
+ * What that costs is small and worth naming: a stray inline <script> in
+ * application code would not be caught here. It would still be caught
+ * by `npm run preview`, which runs the strict policy against the real
+ * build. Every other directive — connect-src, img-src, font-src — is
+ * identical in both, so the change this is really guarding against
+ * (someone adding a third-party origin) still fails fast in dev.
+ */
+const DEV_CSP = PRODUCTION_CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'");
+
+/**
+ * Removes the static app shell when running `npm run dev`.
+ *
+ * The shell exists so the production page has something to paint before
+ * React mounts, and that only works because the production build inlines
+ * the stylesheet into the same HTML document (see inlineEntryStylesheet
+ * below) — markup and styles arrive together, in one response.
+ *
+ * The dev server does neither. Vite serves CSS by having JavaScript
+ * inject it at runtime, so there is no stylesheet in the document at
+ * all until main.jsx has run. The shell therefore painted completely
+ * unstyled on every refresh — raw Times New Roman and a full-width
+ * logo — and only snapped into place once React mounted. In production
+ * that flash cannot happen; in development it happened every time,
+ * which is both unpleasant to work against and actively misleading,
+ * because it looks exactly like the app having failed to load.
+ *
+ * Stripping it in dev costs nothing: its whole purpose is the first
+ * paint of a cold production visit, which the dev server does not
+ * simulate anyway. `npm run preview` serves the real build, shell
+ * included, and is where that behaviour should be checked.
+ */
+function devStripsAppShell() {
+  const SHELL = /[ \t]*<!-- app-shell:start -->[\s\S]*?<!-- app-shell:end -->\n?/;
+
+  return {
+    name: 'dev-strips-app-shell',
+    apply: 'serve',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        return html.replace(SHELL, '');
+      },
+    },
+  };
+}
 
 /**
  * Fails the build if index.html's static app shell no longer matches the
@@ -197,7 +262,7 @@ function inlineEntryStylesheet() {
 // deployed at the domain root or under a sub-path without code changes.
 
 export default defineConfig({
-  plugins: [react(), assertHeroShellMatches(), stylesheetFirst(), inlineEntryStylesheet()],
+  plugins: [react(), devStripsAppShell(), assertHeroShellMatches(), stylesheetFirst(), inlineEntryStylesheet()],
   base: process.env.VITE_BASE_PATH || '/',
   /**
    * Security audit 2026-09-18 (SEC-01): the Content-Security-Policy that
@@ -211,10 +276,11 @@ export default defineConfig({
    */
   server: {
     port: 5173,
-    headers: { 'Content-Security-Policy': CSP },
+    headers: { 'Content-Security-Policy': DEV_CSP },
   },
   preview: {
-    headers: { 'Content-Security-Policy': CSP },
+    // The real build, under the real policy.
+    headers: { 'Content-Security-Policy': PRODUCTION_CSP },
   },
   build: {
     outDir: 'dist',

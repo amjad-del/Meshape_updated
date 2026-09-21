@@ -25,7 +25,7 @@ function GalleryImage({ src, alt }) {
       {!loaded && <div className="product-gallery__skeleton" aria-hidden="true" />}
       {/* This is the Largest Contentful Paint element of every product
           page, and it cannot be discovered in the HTML — its URL only
-          exists once Firestore has returned the product. fetchPriority
+          exists once Firestore has returned the product. fetchpriority
           at least makes the browser treat it as important the moment
           React does mount it, instead of queueing it behind the other
           images on the page (NEW-23). */}
@@ -33,7 +33,9 @@ function GalleryImage({ src, alt }) {
         src={src}
         alt={alt}
         className={`product-gallery__image ${loaded ? 'product-gallery__image--loaded' : ''}`}
-        fetchPriority="high"
+        // Lowercase deliberately — see ProductCard.jsx.
+        // eslint-disable-next-line react/no-unknown-property
+        fetchpriority="high"
         decoding="sync"
         onLoad={() => setLoaded(true)}
       />

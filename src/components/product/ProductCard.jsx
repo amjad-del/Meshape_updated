@@ -56,7 +56,18 @@ export default function ProductCard({ product, priority = false }) {
             src={getOptimizedImageUrl(getPrimaryImage(product), { width: 400 })}
             alt={product.name}
             loading={priority ? 'eager' : 'lazy'}
-            fetchPriority={priority ? 'high' : undefined}
+            // Lowercase deliberately, and the two tools disagree about
+            // it. React 18 does not recognise the camelCase
+            // `fetchPriority` prop: it lowercases the attribute anyway
+            // but logs a warning on every single render, which buries
+            // real warnings. eslint-plugin-react, meanwhile, has been
+            // updated for React 19 (where camelCase is correct) and
+            // flags the lowercase form. The runtime is the one the
+            // person using the site experiences, so lowercase wins and
+            // the lint rule is silenced here rather than project-wide.
+            // Revisit both when this upgrades to React 19.
+            // eslint-disable-next-line react/no-unknown-property
+            fetchpriority={priority ? 'high' : undefined}
             decoding={priority ? 'sync' : 'async'}
           />
         </Link>
